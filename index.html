@@ -8,21 +8,25 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     
     <style>
-        body { font-family: 'Inter', sans-serif; background: #0f0f0f; color: #fff; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
-        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
+        body { font-family: 'Inter', sans-serif; background: #0f0f0f; color: #fff; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 10px; }
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 10px; }
         
-        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
-        #start-btn { padding: 18px 36px; font-size: 1.2rem; font-weight: bold; border: none; border-radius: 50px; background: #2e7d32; color: white; cursor: pointer; box-shadow: 0 4px 15px rgba(46, 125, 50, 0.4); }
+        /* Start Overlay for Audio Permissions */
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        #start-btn { padding: 20px 40px; font-size: 1.3rem; font-weight: bold; border: none; border-radius: 50px; background: #2e7d32; color: white; cursor: pointer; box-shadow: 0 4px 20px rgba(46, 125, 50, 0.5); transition: 0.2s; }
+        #start-btn:active { transform: scale(0.95); }
 
         .video-box { position: relative; border-radius: 12px; overflow: hidden; border: 2px solid #333; line-height: 0; }
         video { width: 100%; transform: scaleX(-1); }
 
-        #status-box { width: 100%; padding: 25px 0; border-radius: 12px; background: #1b5e20; text-align: center; font-size: 1.8rem; font-weight: 800; transition: 0.3s; }
-        .red-alert { background: #b71c1c !important; box-shadow: 0 0 30px #ff0000; animation: pulse 1s infinite; }
+        #status-box { width: 100%; padding: 20px 0; border-radius: 12px; background: #1b5e20; text-align: center; font-size: 1.6rem; font-weight: 800; transition: 0.3s; }
+        .red-alert { background: #b71c1c !important; box-shadow: 0 0 40px #ff0000; animation: pulse 1s infinite; }
         
-        #log-container { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 15px; height: 150px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; color: #aaa; }
-        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #222; padding-bottom: 2px; }
-        .log-red { color: #ff5252; font-weight: bold; }
+        #countdown-container { height: 40px; text-align: center; font-size: 1.2rem; color: #ffca28; font-weight: bold; }
+        
+        #log-container { background: #141414; border: 1px solid #333; border-radius: 12px; padding: 15px; height: 120px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; color: #888; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #222; }
+        .log-red { color: #ff5252 !important; font-weight: bold; }
 
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
     </style>
@@ -30,8 +34,8 @@
 <body>
 
     <div id="overlay">
-        <button id="start-btn">ENABLE CAMERA & ALARM</button>
-        <p style="color: #666; margin-top: 15px;">Required to unlock audio and video</p>
+        <button id="start-btn">START SAFETY MONITOR</button>
+        <p style="color: #666; margin-top: 15px; max-width: 250px;">Clicking above enables the Alarm Sound and Camera Access.</p>
     </div>
 
     <div class="container">
@@ -40,9 +44,11 @@
         </div>
 
         <div id="status-box">SYSTEM READY</div>
+        
+        <div id="countdown-container"></div>
 
         <div id="log-container">
-            <div class="log-entry">Waiting for system start...</div>
+            <div class="log-entry">Waiting for user to start...</div>
         </div>
     </div>
 
@@ -51,6 +57,7 @@
     <script>
         const videoElement = document.getElementById('webcam');
         const statusBox = document.getElementById('status-box');
+        const countdownDisplay = document.getElementById('countdown-container');
         const logContainer = document.getElementById('log-container');
         const alarmSound = document.getElementById('alarm-sound');
         const startBtn = document.getElementById('start-btn');
@@ -58,9 +65,10 @@
 
         let firstIncidentTime = 0;
         let isCooldown = false;
+        let timerInterval = null;
 
         function addLog(message, isAlert = false) {
-            const now = new Date().toLocaleTimeString();
+            const now = new Date().toLocaleTimeString([], { hour12: false });
             const entry = document.createElement('div');
             entry.className = `log-entry ${isAlert ? 'log-red' : ''}`;
             entry.innerHTML = `[${now}] ${message}`;
@@ -68,23 +76,39 @@
         }
 
         function isDistressSignal(lm) {
-            // Calculate distance between wrist (0) and landmarks
             const getDist = (pt1, pt2) => Math.sqrt(Math.pow(pt1.x - pt2.x, 2) + Math.pow(pt1.y - pt2.y, 2));
-            
             const wrist = lm[0];
             
-            // 1. Thumb Position: Tip (4) must be closer to pinky base (17) than index base (5)
-            // This confirms the thumb is tucked across the palm.
+            // 1. Thumb Tucked (Thumb tip 4 is closer to pinky base 17 than index base 5)
             const thumbTucked = getDist(lm[4], lm[17]) < getDist(lm[4], lm[5]);
 
-            // 2. Fingers State: Tip must be closer to the wrist than the knuckle
-            // This works regardless of hand tilt/rotation.
+            // 2. Fingers Closed (Tip is closer to wrist than knuckle is)
             const f1_closed = getDist(lm[8], wrist) < getDist(lm[6], wrist);
             const f2_closed = getDist(lm[12], wrist) < getDist(lm[10], wrist);
             const f3_closed = getDist(lm[16], wrist) < getDist(lm[14], wrist);
             const f4_closed = getDist(lm[20], wrist) < getDist(lm[18], wrist);
 
             return thumbTucked && f1_closed && f2_closed && f3_closed && f4_closed;
+        }
+
+        function startCountdown() {
+            let timeLeft = 15;
+            clearInterval(timerInterval);
+            countdownDisplay.innerText = `ALARM WINDOW: ${timeLeft}s remaining`;
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    countdownDisplay.innerText = "";
+                    firstIncidentTime = 0;
+                    statusBox.classList.remove('red-alert');
+                    statusBox.innerText = "SYSTEM READY";
+                    addLog("Window expired. System reset.");
+                } else {
+                    countdownDisplay.innerText = `ALARM WINDOW: ${timeLeft}s remaining`;
+                }
+            }, 1000);
         }
 
         function handleDetection() {
@@ -94,24 +118,35 @@
             statusBox.classList.add('red-alert');
             statusBox.innerText = "SIGNAL DETECTED";
             
-            // Incident Timing Logic
             if (firstIncidentTime > 0 && (now - firstIncidentTime) < 15000) {
-                addLog("SECOND SIGNAL DETECTED - TRIGGERING ALARM", true);
-                alarmSound.play();
-                firstIncidentTime = 0; // Reset after alarm
-            } else {
-                addLog("First signal detected. 15s window started.");
-                firstIncidentTime = now;
-            }
-
-            isCooldown = true;
-            setTimeout(() => {
-                isCooldown = false;
-                if (firstIncidentTime === 0 || (Date.now() - firstIncidentTime) > 15000) {
+                // SECOND SIGNAL
+                addLog("SECOND SIGNAL - ALARM TRIGGERED!", true);
+                alarmSound.play().catch(e => addLog("Sound Blocked: " + e.message));
+                
+                clearInterval(timerInterval);
+                countdownDisplay.innerText = "!!! ALARM ACTIVE !!!";
+                
+                // Keep alarm state for 5s
+                isCooldown = true;
+                setTimeout(() => {
+                    alarmSound.pause();
+                    alarmSound.currentTime = 0;
+                    countdownDisplay.innerText = "";
                     statusBox.classList.remove('red-alert');
                     statusBox.innerText = "SYSTEM READY";
-                }
-            }, 3000); 
+                    firstIncidentTime = 0;
+                    isCooldown = false;
+                }, 5000);
+            } else {
+                // FIRST SIGNAL
+                addLog("First signal detected. 15s window open.");
+                firstIncidentTime = now;
+                startCountdown();
+                
+                // Brief cooldown so it doesn't double-count the same movement
+                isCooldown = true;
+                setTimeout(() => { isCooldown = false; }, 2000);
+            }
         }
 
         const hands = new Hands({
@@ -121,7 +156,7 @@
         hands.setOptions({
             maxNumHands: 1,
             modelComplexity: 1,
-            minDetectionConfidence: 0.7,
+            minDetectionConfidence: 0.75, // Stricter confidence to reduce flicker
             minTrackingConfidence: 0.7
         });
 
@@ -137,18 +172,20 @@
 
         startBtn.addEventListener('click', () => {
             overlay.style.display = 'none';
-            // Unlock audio
+            
+            // IMPORTANT: "Prime" the audio on user gesture
             alarmSound.play().then(() => {
                 alarmSound.pause();
                 alarmSound.currentTime = 0;
-            });
+                addLog("Audio unlocked.");
+            }).catch(e => addLog("Audio Init Failed: " + e.message));
             
             const camera = new Camera(videoElement, {
                 onFrame: async () => { await hands.send({image: videoElement}); },
                 width: 640, height: 480
             });
             camera.start();
-            addLog("System initialized. Camera active.");
+            addLog("Camera active. Monitoring started.");
         });
     </script>
 </body>
