@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Safety Signal Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; }
+    .container { display: flex; justify-content: center; gap: 20px; padding: 20px; }
+    #video-container { position: relative; border: 4px solid #444; }
+    video { width: 480px; height: 360px; transform: scaleX(-1); }
+    #status-indicator { width: 200px; height: 360px; background: green; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 24px; border-radius: 10px; transition: 0.3s; }
+    #log-box { width: 700px; height: 100px; background: #000; margin: 20px auto; padding: 10px; overflow-y: scroll; text-align: left; font-family: monospace; border: 1px solid #444; color: #0f0; }
+    .alarm-active { background: red !important; animation: blink 0.5s infinite; }
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+  </style>
+</head>
+<body>
+  <h2>Emergency Signal Detection (Hand Gesture)</h2>
+  <div class="container">
+    <div id="video-container">
+      <video id="input_video"></video>
+    </div>
+    <div id="status-indicator">SAFE</div>
+  </div>
+  <div id="log-box">System Status: Waiting for Camera...</div>
+  <audio id="alarm" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"></audio>
+
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const statusBox = document.getElementById('status-indicator');
+    const logBox = document.getElementById('log-box');
+    const alarm = document.getElementById('alarm');
+    
+    let signalCount = 0;
+    let isSignaling = false;
+
+    function onResults(results) {
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const hand = results.multiHandLandmarks[0];
+        
+        // LOGIC: Check if thumb is tucked (Point 4 near Palm) 
+        // and if fingers are starting to cover it (Point 8, 12, 16, 20 moving down)
+        const thumbTucked = hand[4].x > hand[3].x; // Simple check for thumb position
+        const fingersDown = hand[8].y > hand[6].y; // Index finger folding
+
+        if (thumbTucked && fingersDown) {
+          if (!isSignaling) {
+            isSignaling = true;
+            signalCount++;
+            triggerAlert();
+          }
+        } else {
+          isSignaling = false;
+          resetAlert();
+        }
+      }
+    }
+
+    function triggerAlert() {
+      statusBox.style.background = "red";
+      statusBox.innerText = "DISTRESS SIGNAL";
+      logBox.innerHTML += `<br>> [ALERT] Signal detected! Count: ${signalCount}`;
+      logBox.scrollTop = logBox.scrollHeight;
+
+      if (signalCount >= 2) {
+        alarm.play();
+        logBox.innerHTML += `<br>> [CRITICAL] Audio Alarm Triggered!`;
+      }
+    }
+
+    function resetAlert() {
+      statusBox.style.background = "green";
+      statusBox.innerText = "SAFE";
+    }
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({image: videoElement}); },
+      width: 480, height: 360
+    });
+    camera.start();
+    logBox.innerHTML += `<br>> Camera Active. AI monitoring started...`;
+  </script>
+</body>
+</html>
